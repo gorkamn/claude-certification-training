@@ -1,11 +1,13 @@
 import React, { useState, useCallback } from 'react'
 import ConversationPanel from './ConversationPanel.jsx'
 import CodePanel from './CodePanel.jsx'
+import ConfigPanel from './ConfigPanel.jsx'
 
 export default function ScenarioView({ scenario, onBack }) {
   const [state, setState] = useState('idle') // idle | running | done | error
   const [result, setResult] = useState(null)
   const [errorMsg, setErrorMsg] = useState('')
+  const [track, setTrack] = useState(0) // 0 = Track 1 (Python SDK), 1 = Track 2 (Claude Code CLI)
 
   const runScenario = useCallback(async () => {
     setState('running')
@@ -98,11 +100,14 @@ export default function ScenarioView({ scenario, onBack }) {
           </div>
         </div>
 
-        {/* Right: Code */}
+        {/* Right: Track switcher + content */}
         <div style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <PanelHeader label="Code" icon="⌨" />
+          <TrackTabs track={track} onTrack={setTrack} />
           <div style={{ flex: 1, overflow: 'auto' }}>
-            <CodePanel scenario={scenario} result={result} />
+            {track === 0
+              ? <CodePanel scenario={scenario} result={result} />
+              : <ConfigPanel scenario={scenario} />
+            }
           </div>
         </div>
       </div>
@@ -125,6 +130,56 @@ function PanelHeader({ label, icon }) {
       <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', letterSpacing: '0.05em' }}>
         {label.toUpperCase()}
       </span>
+    </div>
+  )
+}
+
+function TrackTabs({ track, onTrack }) {
+  const tabs = [
+    { label: 'Track 1', sub: 'Python SDK', icon: '🐍' },
+    { label: 'Track 2', sub: 'Claude Code CLI', icon: '⚙' },
+  ]
+  return (
+    <div style={{
+      display: 'flex',
+      background: 'var(--bg-panel)',
+      borderBottom: '1px solid var(--border)',
+      flexShrink: 0,
+    }}>
+      {tabs.map((t, i) => {
+        const active = track === i
+        return (
+          <button
+            key={t.label}
+            onClick={() => onTrack(i)}
+            style={{
+              flex: 1,
+              background: active ? 'var(--bg-card)' : 'none',
+              borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
+              borderRight: i === 0 ? '1px solid var(--border)' : 'none',
+              padding: '8px 12px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 2,
+              cursor: 'pointer',
+              transition: 'background 0.15s',
+            }}
+          >
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              fontSize: 12, fontWeight: 600,
+              color: active ? 'var(--text-primary)' : 'var(--text-muted)',
+            }}>
+              <span style={{ fontSize: 13 }}>{t.icon}</span>
+              {t.label}
+            </div>
+            <div style={{ fontSize: 10, color: active ? 'var(--accent)' : 'var(--text-muted)', letterSpacing: '0.03em' }}>
+              {t.sub}
+            </div>
+          </button>
+        )
+      })}
     </div>
   )
 }

@@ -368,6 +368,277 @@ def extract_case_summary(conversation_text, max_retries=2):
 // Line index: 1-4=tool_choice options, 16-20=nullable fields, 44=tool_choice:"any",
 //             33-39=retry with specific error
 
+// ─── Claude Code config file contents (Track 2) ───────────────────────────────
+
+const CLAUDE_MD_CONTENT = `\
+<!--
+EXAM CONCEPT (Task 3.1): CLAUDE.md Configuration Hierarchy
+  - User-level (~/.claude/CLAUDE.md): personal, NOT version-controlled, not shared with team
+  - Project-level (this file): shared via git, applies to ALL team members
+  - Directory-level (subdirectory CLAUDE.md): applies only to that subtree
+
+This file is the PROJECT-LEVEL CLAUDE.md. Instructions here apply to all developers
+who clone this repo — unlike user-level config which only affects that individual.
+
+EXAM CONCEPT (Task 3.1): @import syntax for modular organization.
+Use @import to reference external files rather than building a monolithic CLAUDE.md.
+Each package imports only its relevant standards.
+-->
+
+# TechCo Customer Support Agent — Project Configuration
+
+## Project Overview
+This is the TechCo Customer Support Agent — a production agentic system using the
+Claude Agent SDK. It handles customer returns, refunds, order lookups, and escalations.
+
+## Universal Standards (all code in this project)
+
+### Tool Sequence Rule
+Always call tools in this order: get_customer → lookup_order → process_refund.
+Never skip customer verification. Prompt-based suggestions are probabilistic;
+programmatic hooks enforce this at runtime, but prompts should reinforce it.
+
+### Error Handling
+All MCP tools return structured errors with:
+- \`errorCategory\`: transient | validation | business | permission
+- \`isRetryable\`: boolean
+- \`description\`: human-readable message
+Never write code that treats all errors as retryable.
+
+### Testing Standards
+@import .claude/rules/testing.md
+
+### API Conventions
+@import .claude/rules/api-conventions.md
+
+## Architecture Notes
+- \`agent/agent_loop.py\` — agentic loop (stop_reason-based, NOT content-based termination)
+- \`agent/hooks.py\` — PostToolUse hooks for deterministic policy enforcement
+- \`mcp_server/tools/\` — one file per tool, each with TOOL_DEFINITION and execute()
+- \`extraction/\` — tool_use-based structured extraction with validation-retry loops
+- \`context/\` — case facts persistence and scratchpad for long sessions
+
+## Code Review Checklist
+When reviewing PRs in this project:
+1. Agentic loops must terminate on stop_reason == "end_turn", not on text content
+2. Tool descriptions must include: input format, example queries, edge cases, boundary vs similar tools
+3. New tools must use structured error responses (errorCategory + isRetryable)
+4. Extraction schemas must mark optional fields as nullable to prevent hallucination
+5. Never use the Batch API for blocking/synchronous workflows`
+
+const MCP_JSON_CONTENT = `\
+{
+  "_comment": "EXAM CONCEPT (Task 2.4): MCP Server Configuration",
+  "_concept1": "Project-scoped (.mcp.json in project root) = shared with team via version control",
+  "_concept2": "User-scoped (~/.claude.json) = personal/experimental, NOT shared",
+  "_concept3": "Environment variable expansion (\${VAR}) for credentials — never commit secrets",
+  "_concept4": "All configured MCP servers are discovered at connection time and available simultaneously",
+
+  "mcpServers": {
+    "support-tools": {
+      "_comment": "Custom MCP server for TechCo support tools (get_customer, lookup_order, etc.)",
+      "command": "python",
+      "args": ["-m", "mcp_server.server"],
+      "env": {
+        "ANTHROPIC_API_KEY": "\${ANTHROPIC_API_KEY}",
+        "REFUND_THRESHOLD": "\${REFUND_THRESHOLD}",
+        "HUMAN_ESCALATION_EMAIL": "\${HUMAN_ESCALATION_EMAIL}"
+      }
+    },
+
+    "filesystem": {
+      "_comment": "Community MCP server for file access — prefer existing community servers over custom ones",
+      "_exam_note": "Choose existing community MCP servers for standard integrations; reserve custom servers for team-specific workflows",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "./",
+        "./.scratch"
+      ]
+    }
+  }
+}`
+
+const REVIEW_CASE_CONTENT = `\
+<!--
+EXAM CONCEPT (Task 3.2): Project-scoped slash commands in .claude/commands/
+Commands here are version-controlled and available to ALL developers on clone/pull.
+Personal commands go in ~/.claude/commands/ and are NOT shared.
+
+Usage: /review-case ORD-1001
+-->
+
+# Review Support Case
+
+Review the support case for the given order or customer ID. Check:
+
+1. **Tool sequence compliance**: Was get_customer called before lookup_order?
+2. **Error handling**: Were structured errors returned with errorCategory and isRetryable?
+3. **Escalation logic**: Was escalation triggered by the correct criteria (not sentiment)?
+4. **Context preservation**: Were case facts persisted outside summarized history?
+5. **Hook enforcement**: For refunds > $500, was the pre-tool hook triggered?
+
+Argument: $ARGUMENTS (order ID or customer ID to review)
+
+If no argument provided, review the most recent case in the escalation log.`
+
+const ANALYZE_TICKET_SKILL_CONTENT = `\
+---
+# EXAM CONCEPT (Task 3.2): Skill frontmatter options
+#
+# context: fork
+#   Runs this skill in an ISOLATED sub-agent context.
+#   Prevents verbose skill output from polluting the main conversation context.
+#   Use when: skill produces lots of exploratory output you don't want in main session.
+#
+# allowed-tools
+#   Restricts which tools are available during skill execution.
+#   Prevents destructive actions; limits scope to what the skill actually needs.
+#
+# argument-hint
+#   Shown to the developer when they invoke the skill without arguments.
+#
+# KEY EXAM DISTINCTION:
+#   Skills (on-demand invocation) vs CLAUDE.md (always-loaded universal standards)
+#   Use skills for task-specific, on-demand workflows.
+#   Use CLAUDE.md for conventions that should always apply.
+
+context: fork
+allowed-tools: Read, Grep, Glob
+argument-hint: "Provide a case transcript or conversation ID to analyze"
+---
+
+# Analyze Support Ticket
+
+Analyze the provided support ticket transcript and produce a structured case review.
+
+## Instructions
+
+Given the transcript in $ARGUMENTS, extract and report:
+
+### 1. Case Classification
+- Primary intent (refund/return/order status/account/billing/other)
+- Customer sentiment (positive/neutral/frustrated/angry)
+- Resolution status (resolved/escalated/pending)
+
+### 2. Tool Usage Audit
+- Were tools called in the correct sequence? (get_customer → lookup_order → process_refund)
+- Were any verification steps skipped?
+- Were structured errors returned correctly?
+
+### 3. Escalation Decision Audit
+- Was the escalation trigger correct? (explicit request / policy gap / threshold / unable to progress)
+- Was sentiment incorrectly used as the escalation trigger? (flag this as a defect)
+- Was the escalation summary complete? (customer ID, root cause, recommended action)
+
+### 4. Context Management
+- Were case facts (amounts, order IDs) preserved in a structured block?
+- Were tool outputs trimmed to relevant fields?
+
+### 5. Recommendations
+List any issues found and suggested improvements.
+
+Note: This skill runs in isolated context (context: fork) so its output
+does not accumulate in your main session.`
+
+const API_CONVENTIONS_CONTENT = `\
+---
+# EXAM CONCEPT (Task 3.3): Path-specific rules.
+# These conventions apply ONLY when editing files in the mcp_server/ or agent/ directories.
+# Developers working on extraction/ or context/ won't see these rules — reducing noise.
+paths:
+  - "mcp_server/**/*"
+  - "agent/**/*"
+---
+
+# API & MCP Tool Conventions
+
+## Tool Definition Structure
+Every tool file must export:
+- \`TOOL_DEFINITION\` dict with: name, description, input_schema
+- \`execute(**kwargs)\` function returning MCP-compatible response
+
+## Tool Description Requirements (CRITICAL for tool selection reliability)
+Tool descriptions MUST include:
+1. What the tool does (1 sentence)
+2. When to use it (specific trigger conditions)
+3. When NOT to use it (distinguish from similar tools)
+4. Input format with examples
+5. What it returns
+6. Edge cases and error conditions
+
+## Error Response Format
+All tool execute() functions must return this structure:
+\`\`\`python
+# Success
+{"isError": False, "content": [{"type": "text", "text": str(result)}]}
+
+# Error
+{"isError": True, "content": [{"type": "text", "text": str({
+    "errorCategory": "transient|validation|business|permission",
+    "isRetryable": True|False,
+    "description": "Human-readable explanation"
+})}]}
+\`\`\`
+
+## tool_choice Configuration
+- Use "auto" only when tool calling is optional
+- Use "any" when the model MUST call a tool (structured output workflows)
+- Use {"type": "tool", "name": "..."} to force a specific tool
+
+## Agentic Loop Pattern
+\`\`\`python
+while True:
+    response = client.messages.create(...)
+    if response.stop_reason == "end_turn":
+        break  # Correct termination
+    if response.stop_reason == "tool_use":
+        # execute tools, append results, continue
+        ...
+    # Do NOT check text content to decide termination
+\`\`\``
+
+const TESTING_MD_CONTENT = `\
+---
+# EXAM CONCEPT (Task 3.3): Path-specific rules with YAML frontmatter glob patterns.
+# Rules here ONLY load when editing files matching these paths.
+# This reduces irrelevant context and token usage when working on non-test files.
+#
+# WHY path-specific rules over directory-level CLAUDE.md:
+# Test files are spread throughout the codebase alongside the code they test
+# (e.g., tools/test_get_customer.py next to tools/get_customer.py).
+# A glob pattern like **/*.test.py applies regardless of directory location,
+# while a subdirectory CLAUDE.md only applies within that one directory.
+paths:
+  - "**/*test*.py"
+  - "**/test_*.py"
+  - "tests/**/*"
+---
+
+# Testing Conventions for TechCo Support Agent
+
+## Test Structure
+Each tool must have a corresponding test file: \`tests/test_{tool_name}.py\`
+
+## Required Test Cases for Every Tool
+1. Happy path — valid inputs, expected success response
+2. Validation error — invalid input format, verify errorCategory == "validation"
+3. Transient error simulation — verify isRetryable == True
+4. Business rule error — verify isRetryable == False with clear description
+5. Boundary conditions — e.g., refund exactly at $500 threshold
+
+## Batch API Testing
+- Never test batch workflows with real-time assertions
+- Use custom_id to correlate results in test assertions
+- Mock the 24-hour processing window in tests
+
+## Agentic Loop Tests
+- Verify the loop terminates on stop_reason == "end_turn"
+- Verify the loop continues on stop_reason == "tool_use"
+- Test hook interception: submit a $600 refund and verify it's blocked and redirected
+- Never assert termination based on text content patterns`
+
 // ─── Scenario definitions ─────────────────────────────────────────────────────
 
 export const SCENARIOS = [
@@ -478,6 +749,89 @@ export const SCENARIOS = [
         ],
       },
     ],
+    configFiles: [
+      {
+        name: 'CLAUDE.md',
+        path: 'logic/CLAUDE.md',
+        language: 'markdown',
+        content: CLAUDE_MD_CONTENT,
+        highlights: [
+          { start: 1,  end: 14, color: 'rgba(59,130,246,0.15)'  },  // blue: exam concept comment
+          { start: 34, end: 35, color: 'rgba(245,158,11,0.25)'  },  // amber: @import lines
+          { start: 36, end: 36, color: 'rgba(245,158,11,0.25)'  },
+        ],
+        explanation: [
+          {
+            color: '#3b82f6',
+            badge: 'Task 3.1 — Configuration hierarchy',
+            title: 'Project-level CLAUDE.md is version-controlled and shared with the whole team',
+            body: 'There are three CLAUDE.md scopes: user-level (~/.claude/CLAUDE.md, personal, not in git), project-level (this file, committed to repo, applies to everyone who clones), and directory-level (applies only to that subtree). The exam tests that you know which scope is appropriate: team conventions go in project-level; personal preferences go in user-level.',
+          },
+          {
+            color: '#f59e0b',
+            badge: 'Task 3.1 — @import syntax',
+            title: '@import keeps the main CLAUDE.md concise and modular',
+            body: 'Instead of one 500-line CLAUDE.md, @import lets you split conventions by domain: testing rules in .claude/rules/testing.md, API conventions in .claude/rules/api-conventions.md. Each developer\'s session only loads the files relevant to what they\'re editing (if path-specific rules are used). This reduces token usage and keeps each rules file focused on a single concern.',
+          },
+        ],
+      },
+      {
+        name: '.mcp.json',
+        path: 'logic/.mcp.json',
+        language: 'json',
+        content: MCP_JSON_CONTENT,
+        highlights: [
+          { start: 2,  end: 5,  color: 'rgba(59,130,246,0.18)'  },  // blue: concept comments
+          { start: 12, end: 21, color: 'rgba(16,185,129,0.18)'  },  // green: custom MCP server
+          { start: 17, end: 20, color: 'rgba(245,158,11,0.25)'  },  // amber: env var expansion
+          { start: 23, end: 35, color: 'rgba(124,58,237,0.15)'  },  // purple: community server
+        ],
+        explanation: [
+          {
+            color: '#3b82f6',
+            badge: 'Task 2.4 — MCP scoping',
+            title: 'Project-scoped .mcp.json is committed to git; user-scoped ~/.claude.json is personal',
+            body: 'The MCP server configuration lives in .mcp.json at the project root. When committed to git, every developer who clones the repo automatically gets the same MCP server configuration. Personal/experimental MCP servers (ones you don\'t want to share with the team) go in the user-scoped file.',
+          },
+          {
+            color: '#f59e0b',
+            badge: 'Task 2.4 — Credential handling',
+            title: '${VAR} expansion — credentials never live in the config file',
+            body: 'MCP server env blocks use ${VARIABLE_NAME} expansion. The actual values come from the shell environment or .env files (which are .gitignored). This pattern means the config file can be committed safely while secrets stay out of version control. The exam tests this: credentials in .mcp.json directly is an anti-pattern.',
+          },
+          {
+            color: '#7c3aed',
+            badge: 'Task 2.4 — Custom vs community servers',
+            title: 'Use community MCP servers for standard integrations; reserve custom for team-specific logic',
+            body: 'The filesystem server is from the @modelcontextprotocol/server-filesystem community package — no custom code needed. The support-tools server is custom (python -m mcp_server.server) because it wraps business-specific tools. The exam principle: don\'t build custom MCP servers when a community one exists; invest custom development only in workflows that are unique to your team or product.',
+          },
+        ],
+      },
+      {
+        name: 'review-case.md',
+        path: 'logic/.claude/commands/review-case.md',
+        language: 'markdown',
+        content: REVIEW_CASE_CONTENT,
+        highlights: [
+          { start: 1,  end: 7,  color: 'rgba(59,130,246,0.15)'  },  // blue: exam concept comment
+          { start: 17, end: 17, color: 'rgba(245,158,11,0.25)'  },  // amber: $ARGUMENTS line
+        ],
+        explanation: [
+          {
+            color: '#3b82f6',
+            badge: 'Task 3.2 — Slash commands',
+            title: 'Project-scoped commands in .claude/commands/ are available to every team member',
+            body: 'Any .md file in .claude/commands/ becomes a /slash-command in Claude Code. Project-scoped commands are version-controlled — when a developer pulls the latest code, they automatically get the team\'s latest commands. Personal commands (experiments, personal shortcuts) go in ~/.claude/commands/ and are not shared.',
+          },
+          {
+            color: '#f59e0b',
+            badge: 'Task 3.2 — $ARGUMENTS',
+            title: '$ARGUMENTS passes the command\'s argument into the prompt template',
+            body: 'When a developer runs /review-case ORD-1001, the string "ORD-1001" is injected wherever $ARGUMENTS appears in the markdown. This makes commands reusable across different inputs without duplicating the prompt. The command is invoked as a slash command in the Claude Code conversation.',
+          },
+        ],
+      },
+    ],
   },
 
   {
@@ -540,6 +894,59 @@ export const SCENARIOS = [
             badge: 'Task 2.2 — Error categories',
             title: '"business" errorCategory signals a policy violation, not a technical failure',
             body: 'The four error categories map to different coordinator behaviors: transient (retry after delay), validation (fix input and retry), business (policy violation — don\'t retry, escalate), permission (access denied — don\'t retry). Using "business" here tells the coordinator this isn\'t a bug or temporary failure — retrying the exact same call will always produce the same result.',
+          },
+        ],
+      },
+    ],
+    configFiles: [
+      {
+        name: 'CLAUDE.md',
+        path: 'logic/CLAUDE.md',
+        language: 'markdown',
+        content: CLAUDE_MD_CONTENT,
+        highlights: [
+          { start: 24, end: 27, color: 'rgba(239,68,68,0.20)'   },  // red: tool sequence rule
+          { start: 28, end: 33, color: 'rgba(245,158,11,0.20)'  },  // amber: error handling
+          { start: 50, end: 55, color: 'rgba(59,130,246,0.18)'  },  // blue: code review checklist
+        ],
+        explanation: [
+          {
+            color: '#ef4444',
+            badge: 'Task 3.1 — Prompt reinforcement',
+            title: 'CLAUDE.md reinforces the tool sequence rule — hooks enforce it deterministically',
+            body: 'Hooks enforce tool sequence at runtime with 100% reliability. But CLAUDE.md still includes the rule because it shapes the model\'s reasoning during code generation and review. When Claude helps a developer write a new tool, this rule in CLAUDE.md makes it less likely to accidentally generate code that skips customer verification.',
+          },
+          {
+            color: '#f59e0b',
+            badge: 'Task 3.1 — Shared standards',
+            title: 'Error handling standards in CLAUDE.md apply to every tool file in the project',
+            body: 'Without the error handling standard in CLAUDE.md, each developer invents their own error format. One returns {"error": "not found"}, another raises an exception, a third returns an empty result. The model then gets inconsistent signals across tools. A shared standard in CLAUDE.md means every new tool follows the same errorCategory + isRetryable pattern without the developer having to remember it.',
+          },
+        ],
+      },
+      {
+        name: 'api-conventions.md',
+        path: 'logic/.claude/rules/api-conventions.md',
+        language: 'markdown',
+        content: API_CONVENTIONS_CONTENT,
+        highlights: [
+          { start: 1,  end: 8,  color: 'rgba(59,130,246,0.15)'  },  // blue: frontmatter (path-specific)
+          { start: 30, end: 41, color: 'rgba(239,68,68,0.18)'   },  // red: error response format
+          { start: 43, end: 46, color: 'rgba(245,158,11,0.22)'  },  // amber: hook pattern in loop
+          { start: 48, end: 55, color: 'rgba(16,185,129,0.18)'  },  // green: agentic loop pattern
+        ],
+        explanation: [
+          {
+            color: '#3b82f6',
+            badge: 'Task 3.3 — Path-specific rules',
+            title: 'The paths: frontmatter means these rules ONLY load for mcp_server/ and agent/ files',
+            body: 'Path-specific rules (YAML frontmatter with paths: globs) reduce context noise. A developer editing extraction/case_extractor.py doesn\'t need to see MCP tool conventions. One editing agent/agent_loop.py does. Claude Code loads these rules only when the active file matches a glob pattern, keeping each session\'s context focused and reducing token usage.',
+          },
+          {
+            color: '#ef4444',
+            badge: 'Task 3.3 — Enforced conventions',
+            title: 'The error response format here is the same standard as in CLAUDE.md — both reinforce it',
+            body: 'The error format appears both in CLAUDE.md (project-wide) and in api-conventions.md (tool-file-specific). Redundancy is intentional: CLAUDE.md is always loaded, api-conventions.md loads when editing tool files. When a developer is inside get_customer.py, they see the exact format they need immediately — no need to scroll through a long CLAUDE.md.',
           },
         ],
       },
@@ -622,6 +1029,59 @@ export const SCENARIOS = [
         ],
       },
     ],
+    configFiles: [
+      {
+        name: 'SKILL.md',
+        path: 'logic/.claude/skills/analyze-ticket/SKILL.md',
+        language: 'markdown',
+        content: ANALYZE_TICKET_SKILL_CONTENT,
+        highlights: [
+          { start: 1,  end: 19, color: 'rgba(59,130,246,0.12)'  },  // blue: frontmatter comments
+          { start: 20, end: 20, color: 'rgba(245,158,11,0.30)'  },  // amber: context: fork
+          { start: 21, end: 21, color: 'rgba(16,185,129,0.28)'  },  // green: allowed-tools
+          { start: 22, end: 22, color: 'rgba(124,58,237,0.28)'  },  // purple: argument-hint
+          { start: 44, end: 46, color: 'rgba(239,68,68,0.20)'   },  // red: escalation audit section
+        ],
+        explanation: [
+          {
+            color: '#f59e0b',
+            badge: 'Task 3.2 — context: fork',
+            title: 'context: fork runs the skill in an isolated sub-agent — output doesn\'t pollute your session',
+            body: 'Without context: fork, a skill that produces a 200-line analysis report adds all of that to your main conversation context. On a long session, this can push earlier tool results out of the context window. Fork mode runs the skill in a separate agent context; only the final output (if any) returns to the main session. Use it for skills that generate lots of exploratory output.',
+          },
+          {
+            color: '#10b981',
+            badge: 'Task 3.2 — allowed-tools',
+            title: 'allowed-tools: Read, Grep, Glob — this skill can read but not write or call APIs',
+            body: 'Restricting tools to Read, Grep, Glob means this skill can analyze the codebase but cannot modify files or call external services. This is the principle of least privilege applied to skills: give the skill only what it needs. If a skill later needs write access, an explicit change to allowed-tools makes the expanded scope visible in code review.',
+          },
+          {
+            color: '#ef4444',
+            badge: 'Task 3.2 — Skills vs CLAUDE.md',
+            title: 'Skills are on-demand; CLAUDE.md is always-loaded — different tools for different jobs',
+            body: 'The exam tests this distinction explicitly. CLAUDE.md is for standards that should shape every interaction: tool sequence rules, error format conventions, code review criteria. Skills are for specific, invocable workflows: /analyze-ticket, /generate-report, /review-case. A skill that runs always would just be CLAUDE.md content. A CLAUDE.md instruction that requires explicit invocation should be a skill.',
+          },
+        ],
+      },
+      {
+        name: 'CLAUDE.md',
+        path: 'logic/CLAUDE.md',
+        language: 'markdown',
+        content: CLAUDE_MD_CONTENT,
+        highlights: [
+          { start: 42, end: 48, color: 'rgba(245,158,11,0.22)'  },  // amber: architecture notes
+          { start: 50, end: 55, color: 'rgba(16,185,129,0.18)'  },  // green: code review checklist
+        ],
+        explanation: [
+          {
+            color: '#f59e0b',
+            badge: 'Task 3.1 — Architecture in CLAUDE.md',
+            title: 'Architecture notes let Claude navigate the codebase without repeated file searches',
+            body: 'When a developer asks Claude to modify the escalation flow, the Architecture Notes section immediately tells Claude where to look: agent/hooks.py for hook logic, mcp_server/tools/escalate_to_human.py for the tool, prompts/system_prompt.py for the escalation criteria. Without this, Claude would spend tokens doing file searches before it could help.',
+          },
+        ],
+      },
+    ],
   },
 
   {
@@ -689,6 +1149,58 @@ export const SCENARIOS = [
         ],
       },
     ],
+    configFiles: [
+      {
+        name: 'testing.md',
+        path: 'logic/.claude/rules/testing.md',
+        language: 'markdown',
+        content: TESTING_MD_CONTENT,
+        highlights: [
+          { start: 1,  end: 12, color: 'rgba(59,130,246,0.12)'  },  // blue: path-specific frontmatter
+          { start: 5,  end: 10, color: 'rgba(245,158,11,0.22)'  },  // amber: paths globs
+          { start: 27, end: 32, color: 'rgba(16,185,129,0.18)'  },  // green: required test cases
+          { start: 37, end: 41, color: 'rgba(239,68,68,0.18)'   },  // red: agentic loop tests
+        ],
+        explanation: [
+          {
+            color: '#3b82f6',
+            badge: 'Task 3.3 — Why path-specific beats directory CLAUDE.md',
+            title: 'Glob patterns load rules wherever test files live, not just in a tests/ directory',
+            body: 'A directory-level CLAUDE.md in tests/ only applies to files in that directory. But this project co-locates test files with source (tools/test_get_customer.py next to tools/get_customer.py). The paths: globs **/*test*.py and **/test_*.py match test files wherever they live in the tree. This is one of the key advantages path-specific rules have over directory-level CLAUDE.md.',
+          },
+          {
+            color: '#10b981',
+            badge: 'Task 3.3 — Required test coverage',
+            title: 'Defining required test cases in rules means Claude generates them automatically',
+            body: 'When a developer asks Claude to write tests for a new tool, these rules are loaded because the test file matches the path globs. Claude sees: "5 required test cases: happy path, validation error, transient error, business rule error, boundary conditions." It generates all five without being asked. Without this rule file, Claude would write a single happy-path test and call it done.',
+          },
+          {
+            color: '#ef4444',
+            badge: 'Task 1.5 — Agentic loop tests',
+            title: 'Rules require explicit hook interception tests — catches the defense-in-depth pattern',
+            body: 'The testing rules explicitly require: "Test hook interception: submit a $600 refund and verify it\'s blocked." Without this rule, developers might test the process_refund tool in isolation (where the hook doesn\'t fire) and miss that the hook + tool together are what implement the threshold. The rule enforces end-to-end testing of the hook → redirect → escalation flow.',
+          },
+        ],
+      },
+      {
+        name: 'CLAUDE.md',
+        path: 'logic/CLAUDE.md',
+        language: 'markdown',
+        content: CLAUDE_MD_CONTENT,
+        highlights: [
+          { start: 42, end: 48, color: 'rgba(16,185,129,0.18)'  },  // green: architecture
+          { start: 34, end: 36, color: 'rgba(245,158,11,0.25)'  },  // amber: @imports
+        ],
+        explanation: [
+          {
+            color: '#f59e0b',
+            badge: 'Task 3.1 — @import in action',
+            title: 'This CLAUDE.md imports testing.md — so test file edits load both',
+            body: 'When a developer edits a test file, Claude Code loads the project CLAUDE.md (via @import) AND the path-specific testing.md (via glob match). Both sets of rules are active. CLAUDE.md provides project-wide context; testing.md provides test-specific guidance. The @import in CLAUDE.md means developers don\'t have to know about .claude/rules/ — they just work in the project and the right rules load.',
+          },
+        ],
+      },
+    ],
   },
 
   {
@@ -733,6 +1245,52 @@ export const SCENARIOS = [
             badge: 'Task 4.3 — Why tool_use beats prompt-only',
             title: 'tool_use with JSON schema eliminates syntax errors; validation catches semantic errors',
             body: 'Prompt-only extraction asks Claude to produce a JSON string in a text message. This introduces JSON syntax errors (missing commas, unmatched brackets) that require string parsing and error handling. tool_use with input_schema means the API validates the structure before returning it — you get a Python dict, not a string to parse. Semantic errors (wrong values, constraint violations) still require your own validation layer, which is what _validate_extraction() provides.',
+          },
+        ],
+      },
+    ],
+    configFiles: [
+      {
+        name: 'api-conventions.md',
+        path: 'logic/.claude/rules/api-conventions.md',
+        language: 'markdown',
+        content: API_CONVENTIONS_CONTENT,
+        highlights: [
+          { start: 1,  end: 8,  color: 'rgba(59,130,246,0.15)'  },  // blue: path-specific frontmatter
+          { start: 43, end: 47, color: 'rgba(245,158,11,0.28)'  },  // amber: tool_choice section
+          { start: 44, end: 44, color: 'rgba(239,68,68,0.30)'   },  // red: "auto only optional"
+          { start: 45, end: 45, color: 'rgba(16,185,129,0.35)'  },  // green: "any when MUST call"
+        ],
+        explanation: [
+          {
+            color: '#f59e0b',
+            badge: 'Task 3.3 — tool_choice in rules',
+            title: 'The tool_choice guidance lives in api-conventions.md — loads whenever editing tool files',
+            body: 'Because api-conventions.md loads whenever a developer edits anything in mcp_server/ or agent/, the tool_choice guidance is always visible when building extraction tools. When Claude helps write a new extractor, it sees: "use \'any\' when the model MUST call a tool (structured output workflows)" and automatically applies the correct setting — the developer doesn\'t need to remember this distinction.',
+          },
+          {
+            color: '#ef4444',
+            badge: 'Task 4.3 — Codified guidance',
+            title: '"auto" is unreliable for extraction — this rule makes that explicit in the codebase',
+            body: 'Putting the tool_choice guidance in a rules file (not just in developer memory or a README) means it survives team turnover. A new engineer who\'s never heard of the tool_choice issue will have Claude tell them "use \'any\' for structured extraction" because the rules file loads in their session. The convention becomes self-documenting.',
+          },
+        ],
+      },
+      {
+        name: 'CLAUDE.md',
+        path: 'logic/CLAUDE.md',
+        language: 'markdown',
+        content: CLAUDE_MD_CONTENT,
+        highlights: [
+          { start: 50, end: 55, color: 'rgba(124,58,237,0.18)'  },  // purple: checklist item 4 (nullable)
+          { start: 53, end: 53, color: 'rgba(124,58,237,0.35)'  },  // purple strong: nullable rule
+        ],
+        explanation: [
+          {
+            color: '#7c3aed',
+            badge: 'Task 3.1 — Review checklist',
+            title: 'Code review checklist item 4: "mark optional fields nullable to prevent hallucination"',
+            body: 'The CLAUDE.md code review checklist includes the nullable field rule. When a PR adds a new extraction schema, Claude Code\'s review (triggered by the /review-case command or the CI job) checks whether optional fields are nullable. A reviewer who forgets this exam concept will still catch it because CLAUDE.md includes it as a required review criterion.',
           },
         ],
       },
