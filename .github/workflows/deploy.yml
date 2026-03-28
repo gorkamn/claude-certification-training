@@ -1,0 +1,133 @@
+# Deploy pipeline — manual trigger only
+#
+# Deploys 01-agent-loop/ui to AWS:
+#   1. sam build + sam deploy  (Lambda + CloudFront + S3 + Lambda@Edge)
+#   2. npm run build           (React frontend)
+#   3. aws s3 sync             (upload frontend to S3)
+#   4. CloudFront invalidation (bust CDN cache)
+#
+# Required GitHub secrets:
+#   AWS_ACCESS_KEY_ID       — IAM user with SAM deploy permissions
+#   AWS_SECRET_ACCESS_KEY   — IAM user secret
+#   AWS_REGION              — e.g. us-east-1
+#   ANTHROPIC_API_KEY       — passed to Lambda as env var
+#   REFUND_THRESHOLD        — e.g. 500
+#   HUMAN_ESCALATION_EMAIL  — e.g. support@example.com
+#
+# The deploy user needs:
+#   cloudformation:*, s3:*, lambda:*, cloudfront:*, iam:PassRole, iam:GetRole
+
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: "Which project UI to deploy"
+        required: true
+        default: "01-agent-loop"
+        type: choice
+        options:
+          - 01-agent-loop
+          # 02-multi-agent added when that stack is ready
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.project }}/ui
+    runs-on: ubuntu-latest
+    environment: production
+
+    defaults:
+      run:
+        working-directory: ${{ inputs.project }}/ui
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install AWS SAM CLI
+        run: pip install aws-sam-cli
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # ── Backend: SAM build + deploy ────────────────────────────────────────
+      # sam build: installs Python deps into Lambda packages
+      # sam deploy: creates/updates CloudFormation stack
+      #   - Lambda Function URL with AuthType: AWS_IAM (not publicly accessible)
+      #   - Lambda@Edge for SigV4 signing (IncludeBody: true for POST bodies)
+      #   - CloudFront distribution + S3 bucket with OAC
+      - name: SAM build
+        run: sam build
+
+      - name: SAM deploy
+        run: |
+          sam deploy \
+            --no-confirm-changeset \
+            --parameter-overrides \
+              "AnthropicApiKey=${{ secrets.ANTHROPIC_API_KEY }}" \
+              "RefundThreshold=${{ secrets.REFUND_THRESHOLD }}" \
+              "HumanEscalationEmail=${{ secrets.HUMAN_ESCALATION_EMAIL }}"
+
+      # ── Get stack outputs (S3 bucket + CloudFront IDs) ─────────────────────
+      - name: Get stack outputs
+        id: stack
+        run: |
+          STACK_NAME=$(grep 'stack_name' samconfig.toml | head -1 | awk -F'"' '{print $2}')
+          REGION=$(grep 'region' samconfig.toml | head -1 | awk -F'"' '{print $2}')
+
+          BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" --region "$REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" \
+            --output text)
+
+          DIST_ID=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" --region "$REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDistributionId'].OutputValue" \
+            --output text)
+
+          echo "bucket=$BUCKET" >> $GITHUB_OUTPUT
+          echo "distribution_id=$DIST_ID" >> $GITHUB_OUTPUT
+
+      # ── Frontend: build + upload ───────────────────────────────────────────
+      - name: Build frontend
+        run: npm ci && npm run build
+        working-directory: ${{ inputs.project }}/ui/frontend
+
+      - name: Upload to S3
+        run: |
+          aws s3 sync frontend/dist/ s3://${{ steps.stack.outputs.bucket }}/ \
+            --delete \
+            --cache-control "public,max-age=31536000,immutable" \
+            --exclude "index.html"
+
+          # index.html: no-cache so SPA routing always gets latest
+          aws s3 cp frontend/dist/index.html s3://${{ steps.stack.outputs.bucket }}/index.html \
+            --cache-control "no-cache,no-store,must-revalidate"
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ steps.stack.outputs.distribution_id }} \
+            --paths "/*"
+
+      - name: Done
+        run: |
+          STACK_NAME=$(grep 'stack_name' samconfig.toml | head -1 | awk -F'"' '{print $2}')
+          REGION=$(grep 'region' samconfig.toml | head -1 | awk -F'"' '{print $2}')
+          URL=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" --region "$REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='CloudFrontUrl'].OutputValue" \
+            --output text)
+          echo "Deployed to: $URL" >> $GITHUB_STEP_SUMMARY

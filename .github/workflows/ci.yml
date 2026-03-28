@@ -1,0 +1,156 @@
+# CI pipeline — runs on every pull request targeting main
+#
+# Domain 3 coverage:
+#   - Python lint & test: validates agent code quality
+#   - Frontend build: catches broken React builds early
+#   - claude-code-review: Claude Code CLI running non-interactively (--print mode)
+#     to review changed Python files against CLAUDE.md conventions
+#
+# The claude-code-review job is the key Domain 3 CI/CD demonstration:
+# Claude Code CLI can run without a TTY using --print flag, making it
+# suitable for automated pipelines. It reads changed files via git diff
+# and posts its analysis to the GitHub Step Summary.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  # ── Python lint & test ──────────────────────────────────────────────────────
+  python-lint-test:
+    name: Python lint & test (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - 01-agent-loop/logic
+          - 02-multi-agent/logic
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: ${{ matrix.project }}/requirements.txt
+
+      - name: Install dependencies
+        run: pip install ruff pytest -r requirements.txt
+        working-directory: ${{ matrix.project }}
+
+      - name: Lint (ruff)
+        run: ruff check .
+        working-directory: ${{ matrix.project }}
+
+      - name: Test (pytest)
+        run: |
+          # Run tests if a tests/ directory exists; skip gracefully if not yet present
+          if [ -d tests ]; then
+            pytest tests/ -v
+          else
+            echo "No tests/ directory found — skipping (add tests to ${{ matrix.project }}/tests/)"
+          fi
+        working-directory: ${{ matrix.project }}
+
+  # ── Frontend build check ────────────────────────────────────────────────────
+  frontend-build:
+    name: Frontend build (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - 01-agent-loop/ui/frontend
+          # 02-multi-agent/ui/frontend added when that UI is built
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ${{ matrix.project }}/package-lock.json
+
+      - name: Install & build
+        run: npm ci && npm run build
+        working-directory: ${{ matrix.project }}
+
+  # ── Claude Code review (Domain 3 — CI/CD integration) ──────────────────────
+  #
+  # Demonstrates: running Claude Code CLI non-interactively in a CI pipeline.
+  #
+  # How it works:
+  #   1. `claude --print "..."` runs Claude without a TTY — no interactive session
+  #   2. Changed Python files are extracted with `git diff --name-only`
+  #   3. Each changed file is reviewed against agentic loop conventions
+  #   4. Results are appended to $GITHUB_STEP_SUMMARY (visible in Actions UI)
+  #
+  # Key exam concepts demonstrated:
+  #   - Non-interactive mode (--print flag)
+  #   - ANTHROPIC_API_KEY as a GitHub Actions secret
+  #   - Scoped file targeting via git diff (only review what changed)
+  #   - Claude Code CLI as a CI quality gate
+  claude-code-review:
+    name: Claude Code review
+    runs-on: ubuntu-latest
+    # Only run on PRs (skip on direct pushes to main)
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # needed for git diff against base branch
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Review changed Python files
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          # Find Python files changed in this PR
+          CHANGED_FILES=$(git diff origin/${{ github.base_ref }}...HEAD \
+            --name-only --diff-filter=AM | grep '\.py$' || true)
+
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "## Claude Code Review" >> $GITHUB_STEP_SUMMARY
+            echo "No Python files changed in this PR." >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          echo "## Claude Code Review" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Reviewing changed Python files against agentic loop conventions..." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          for FILE in $CHANGED_FILES; do
+            if [ ! -f "$FILE" ]; then continue; fi
+
+            echo "### \`$FILE\`" >> $GITHUB_STEP_SUMMARY
+
+            # Run Claude Code in non-interactive --print mode
+            # Checks for the key agentic patterns defined in CLAUDE.md:
+            #   - stop_reason-based loop termination (not content parsing)
+            #   - structured error responses (errorCategory + isRetryable)
+            #   - hook patterns (PreToolUse/PostToolUse)
+            #   - context isolation (subagents don't inherit coordinator state)
+            claude --print "Review the following file for agentic loop best practices.
+          Check for:
+          1. Agentic loops must terminate on stop_reason == 'end_turn', not on text content
+          2. Tool errors must use structured responses with errorCategory and isRetryable fields
+          3. Hooks (pre_tool_use / post_tool_use) used for deterministic policy enforcement
+          4. Subagents must not inherit coordinator context — all context passed explicitly
+          Be concise. Flag issues with severity (CRITICAL / WARNING / INFO).
+          File: $FILE
+          $(cat $FILE)" >> $GITHUB_STEP_SUMMARY
+
+            echo "" >> $GITHUB_STEP_SUMMARY
+          done
