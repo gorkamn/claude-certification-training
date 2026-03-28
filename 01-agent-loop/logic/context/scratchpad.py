@@ -26,7 +26,6 @@ EXAM CONCEPT (Task 1.7): Session resumption.
 """
 
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 

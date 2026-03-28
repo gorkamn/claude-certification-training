@@ -18,8 +18,8 @@ if not os.getenv("ANTHROPIC_API_KEY"):
     print("Copy .env.example to .env and add your key.")
     sys.exit(1)
 
-from agent.agent_loop import run_agent
-from extraction.case_extractor import extract_case_summary
+from agent.agent_loop import run_agent  # noqa: E402
+from extraction.case_extractor import extract_case_summary  # noqa: E402
 
 
 def run_scenario(title: str, message: str, session_id: str = None):

@@ -17,7 +17,6 @@ TRACK 2 (Claude Code CLI): Run with the coordinator skill:
 """
 
 import sys
-import os
 
 # Force UTF-8 output on Windows to handle unicode in responses
 if sys.platform == "win32":
@@ -27,7 +26,7 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-from agent.coordinator import run_coordinator
+from agent.coordinator import run_coordinator  # noqa: E402
 
 
 def run_demo(title: str, message: str, session_id: str) -> None:

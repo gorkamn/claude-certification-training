@@ -19,15 +19,12 @@ EXAM CONCEPT (Task 5.3): Structured error handling.
   - Coordinator reports partial results to the customer with clear status per concern
 """
 
-import json
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
 
 import anthropic
 from dotenv import load_dotenv
 
-from agent.agent_loop import run_agent_loop
 from agent.subagents import (
     AGENT_REGISTRY,
     SubagentResult,
@@ -148,7 +145,7 @@ def run_coordinator(user_message: str, session_id: str = "coordinator") -> str:
     all_results: dict[str, SubagentResult] = {}
 
     print(f"\n{'='*60}")
-    print(f"COORDINATOR STARTING")
+    print("COORDINATOR STARTING")
     print(f"Customer: {user_message[:100]}...")
     print(f"{'='*60}")
 
@@ -197,7 +194,7 @@ def run_coordinator(user_message: str, session_id: str = "coordinator") -> str:
             if len(spawn_calls) > 1:
                 print(f"\n  [PARALLEL EXECUTION] {len(spawn_calls)} spawn_subagent calls in single response")
             else:
-                print(f"\n  [SEQUENTIAL] 1 spawn_subagent call")
+                print("\n  [SEQUENTIAL] 1 spawn_subagent call")
 
             # =================================================================
             # EXAM CONCEPT (Task 1.3): Parallel execution via ThreadPoolExecutor.

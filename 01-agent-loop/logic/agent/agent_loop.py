@@ -21,7 +21,6 @@ EXAM CONCEPT (Task 1.2): Hub-and-spoke coordinator pattern:
 
 import os
 import sys
-from typing import Any
 
 # Force UTF-8 output on Windows to handle emoji/unicode in Claude responses
 if sys.platform == "win32":
@@ -32,7 +31,7 @@ from dotenv import load_dotenv
 
 from mcp_server.tools import ALL_TOOLS, TOOL_EXECUTORS
 from agent.hooks import pre_tool_use_hook, post_tool_use_hook, HookResult
-from context.case_facts import extract_case_facts, format_case_facts_block
+from context.case_facts import extract_case_facts
 from context.scratchpad import Scratchpad
 
 load_dotenv(override=True)

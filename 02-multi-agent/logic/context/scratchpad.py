@@ -21,7 +21,6 @@ concurrent writes can corrupt the JSON file.
 """
 
 import json
-import os
 import threading
 from datetime import datetime
 from pathlib import Path

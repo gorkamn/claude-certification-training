@@ -35,6 +35,10 @@ samconfig.toml.bak
 # Scratch files (test data with potentially sensitive info — keep examples, exclude local runs)
 # Uncomment to exclude all scratch files: **/.scratch/*.json
 
+# Claude Code local config (machine-specific, never commit)
+.claude/settings.local.json
+.claude/launch.json
+
 # IDE
 .vscode/settings.json
 .idea/

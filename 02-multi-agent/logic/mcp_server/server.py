@@ -20,7 +20,6 @@ TRACK 2 (Claude Code CLI):
 
 import json
 import sys
-from typing import Any
 
 # Minimal MCP server implementation using stdio transport
 # In production, use the official `mcp` Python SDK:
