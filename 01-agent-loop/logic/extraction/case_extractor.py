@@ -210,7 +210,7 @@ def extract_case_summary(conversation_text: str, max_retries: int = 2) -> dict[s
             last_error = validation_error
             print(f"  VALIDATION FAILED: {validation_error}")
             if attempt <= max_retries:
-                print(f"  Retrying with specific error feedback...")
+                print("  Retrying with specific error feedback...")
             continue
 
         print(f"  Validation passed (confidence: {extracted.get('confidence', 0):.0%})")

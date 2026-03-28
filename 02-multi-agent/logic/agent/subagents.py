@@ -22,8 +22,7 @@ so the coordinator reads concise summaries rather than verbose tool outputs.
 """
 
 import os
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 import anthropic
 from dotenv import load_dotenv

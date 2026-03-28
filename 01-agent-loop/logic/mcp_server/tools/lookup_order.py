@@ -8,7 +8,6 @@ lookup_order tool — Domain 2 exam focus areas:
 """
 
 import random
-from datetime import datetime, timedelta
 from typing import Any
 
 # Mock orders database — only 5 relevant fields returned (exam: trim verbose tool outputs)
