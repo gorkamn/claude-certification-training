@@ -1,0 +1,22 @@
+{
+  "session_id": "demo_multi_concern",
+  "created_at": "2026-03-27T20:50:52.523601",
+  "facts": {},
+  "findings": [],
+  "agent_states": {
+    "coordinator": {
+      "saved_at": "2026-03-27T20:55:40.145830",
+      "state": {
+        "completed_agents": [
+          "toolu_01FtcVDKqvTJhoU143J1VHsU",
+          "toolu_01KazvgjaPngneEQK414rEEa",
+          "toolu_016hZjByXiwwtcDsmGZyqbwK",
+          "toolu_01TM1pZnTwcSgXDXd3h4rtVw",
+          "toolu_01Y1L5Nd7sMdLmfo5esrtp6K",
+          "toolu_0185uDxV22cbGTRqUs1kssw2"
+        ],
+        "iteration_count": 4
+      }
+    }
+  }
+}

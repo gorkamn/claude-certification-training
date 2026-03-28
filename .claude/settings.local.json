@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python -c \":*)",
+      "Bash(python demo.py)",
+      "Bash(npm install:*)",
+      "Bash(npx vite:*)",
+      "Bash(node -e \":*)",
+      "Bash(node --input-type=module -e \":*)",
+      "Bash(python -c \"import anthropic; print\\(''anthropic OK:'', anthropic.__version__\\)\")",
+      "Bash(python -c \"import mcp; print\\(mcp.__version__\\)\")",
+      "Bash(python -c \"import os; from dotenv import load_dotenv; load_dotenv\\(override=True\\); key = os.getenv\\(''ANTHROPIC_API_KEY'', ''''\\); print\\(''API key present:'', bool\\(key and ''your_api_key'' not in key\\)\\)\")",
+      "mcp__Claude_Preview__preview_start",
+      "WebSearch"
+    ]
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "_comment": "EXAM CONCEPT (Task 2.4): MCP Server Configuration",
+  "_concept1": "Project-scoped (.mcp.json in project root) = shared with team via version control",
+  "_concept2": "User-scoped (~/.claude.json) = personal/experimental, NOT shared",
+  "_concept3": "Environment variable expansion (${VAR}) for credentials — never commit secrets",
+  "_concept4": "All configured MCP servers are discovered at connection time and available simultaneously",
+
+  "mcpServers": {
+    "support-tools": {
+      "_comment": "Custom MCP server for TechCo support tools (get_customer, lookup_order, etc.)",
+      "_note": "In Track 2 (Claude Code CLI), these tools are referenced as mcp__support-tools__<tool_name>",
+      "command": "python",
+      "args": ["-m", "mcp_server.server"],
+      "env": {
+        "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}",
+        "REFUND_THRESHOLD": "${REFUND_THRESHOLD}",
+        "HUMAN_ESCALATION_EMAIL": "${HUMAN_ESCALATION_EMAIL}"
+      }
+    },
+
+    "filesystem": {
+      "_comment": "Community MCP server for file access (scratchpad files in .scratch/)",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "./",
+        "./.scratch"
+      ]
+    }
+  }
+}

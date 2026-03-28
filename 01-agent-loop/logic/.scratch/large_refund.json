@@ -1,0 +1,19 @@
+{
+  "session_id": "large_refund",
+  "created_at": "2026-03-27T18:16:29.307902",
+  "facts": {
+    "verified_customer_id": "C002",
+    "customer_name": "Bob Smith",
+    "account_status": "active",
+    "customer_tier": "standard",
+    "order_id": "ORD-1003",
+    "order_status": "delivered",
+    "order_total": "799.99",
+    "return_eligible": "True",
+    "return_deadline": "2024-02-05",
+    "escalation_ticket": "ESC-20260327-190824"
+  },
+  "findings": [],
+  "agent_states": {},
+  "last_updated": "2026-03-27T19:08:28.691030"
+}

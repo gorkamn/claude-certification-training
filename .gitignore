@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+ENV/
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Frontend build output
+dist/
+build/
+
+# AWS SAM
+.aws-sam/
+samconfig.toml.bak
+
+# Scratch files (test data with potentially sensitive info)
+.scratch/*.json
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Ruff
+.ruff_cache/
