@@ -32,8 +32,8 @@ build/
 .aws-sam/
 samconfig.toml.bak
 
-# Scratch files (test data with potentially sensitive info)
-.scratch/*.json
+# Scratch files (test data with potentially sensitive info — keep examples, exclude local runs)
+# Uncomment to exclude all scratch files: **/.scratch/*.json
 
 # IDE
 .vscode/settings.json

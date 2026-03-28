@@ -66,7 +66,7 @@ jobs:
       matrix:
         project:
           - 01-agent-loop/ui/frontend
-          # 02-multi-agent/ui/frontend added when that UI is built
+          - 02-multi-agent/ui/frontend
     steps:
       - uses: actions/checkout@v4
 

@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "01-agent-loop/ui/frontend", "run", "dev"],
       "port": 5173
+    },
+    {
+      "name": "Multi-Agent Frontend (Vite)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "02-multi-agent/ui/frontend", "run", "dev"],
+      "port": 5174
     }
   ]
 }

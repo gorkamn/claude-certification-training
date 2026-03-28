@@ -1,0 +1,229 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  TechCo Multi-Agent Support Demo UI
+  Lambda (IAM Function URL) + S3 + CloudFront + Lambda@Edge SigV4 signer
+  Same security architecture as 01-agent-loop/ui — see DEPLOYMENT.md for details.
+
+Parameters:
+  ClaudeModel:
+    Type: String
+    Default: us.anthropic.claude-sonnet-4-6
+    Description: Bedrock cross-region inference profile ID.
+  RefundThreshold:
+    Type: String
+    Default: "500"
+    Description: Dollar threshold above which refunds are blocked by the hook
+  AnthropicApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Anthropic API key (leave blank if using Bedrock)
+  HumanEscalationEmail:
+    Type: String
+    Default: "support@example.com"
+    Description: Email for human escalation tickets
+
+Globals:
+  Function:
+    Timeout: 120    # Multi-agent runs take longer — 3 parallel subagents
+    MemorySize: 512
+
+Resources:
+
+  # ─── Lambda (multi-agent coordinator runner) ──────────────────────────────────
+  CoordinatorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-coordinator"
+      Runtime: python3.13
+      Architectures: [x86_64]
+      CodeUri: backend/
+      Handler: lambda_handler.handler
+      Description: Runs multi-agent coordinator with trace instrumentation
+      Environment:
+        Variables:
+          CLAUDE_MODEL: !Ref ClaudeModel
+          REFUND_THRESHOLD: !Ref RefundThreshold
+          ANTHROPIC_API_KEY: !Ref AnthropicApiKey
+          HUMAN_ESCALATION_EMAIL: !Ref HumanEscalationEmail
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - !Sub "arn:aws:bedrock:*::foundation-model/*"
+                - !Sub "arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*"
+      FunctionUrlConfig:
+        # AuthType: AWS_IAM — not publicly accessible.
+        # Lambda@Edge SigV4 signer handles signing so browsers don't need IAM credentials.
+        AuthType: AWS_IAM
+
+  # ─── Allow Lambda@Edge role to invoke the Function URL ───────────────────────
+  # GOTCHA: Both permissions are required. InvokeFunctionUrl alone causes
+  # AccessDeniedException. See DEPLOYMENT.md for the full explanation.
+  EdgeSignerInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CoordinatorFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: !GetAtt EdgeSignerFunctionRole.Arn
+      FunctionUrlAuthType: AWS_IAM
+
+  EdgeSignerInvokePermission2:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CoordinatorFunction
+      Action: lambda:InvokeFunction
+      Principal: !GetAtt EdgeSignerFunctionRole.Arn
+
+  # ─── Lambda@Edge (SigV4 signer for /api origin requests) ─────────────────────
+  EdgeSignerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-edge-signer"
+      Runtime: nodejs20.x
+      CodeUri: edge-signer/
+      Handler: index.handler
+      MemorySize: 128
+      Timeout: 10
+      AutoPublishAlias: live
+      Description: Signs /api origin requests with SigV4 (origin-request event)
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - edgelambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunctionUrl
+                - lambda:InvokeFunction
+              Resource: !GetAtt CoordinatorFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: "arn:aws:logs:*:*:*"
+
+  # ─── S3 (frontend static files) ──────────────────────────────────────────────
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-frontend-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Sid: AllowCloudFrontOAC
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "arn:aws:s3:::${FrontendBucket}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
+
+  # ─── CloudFront OAC — S3 ─────────────────────────────────────────────────────
+  S3OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-s3-oac"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # ─── CloudFront Distribution ─────────────────────────────────────────────────
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub "${AWS::StackName} multi-agent UI"
+        Enabled: true
+        HttpVersion: http2
+        DefaultRootObject: index.html
+        PriceClass: PriceClass_100
+
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            S3OriginConfig: {}
+            OriginAccessControlId: !GetAtt S3OriginAccessControl.Id
+
+          - Id: LambdaOrigin
+            DomainName: !Select
+              - 2
+              - !Split
+                - "/"
+                - !GetAtt CoordinatorFunctionUrl.FunctionUrl
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+              OriginReadTimeout: 120     # Match Lambda timeout
+
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          # Managed-CachingOptimized
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          Compress: true
+
+        CacheBehaviors:
+          - PathPattern: /api*
+            TargetOriginId: LambdaOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            # Managed-CachingDisabled
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            # Managed-AllViewerExceptHostHeader
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            Compress: true
+            LambdaFunctionAssociations:
+              - EventType: origin-request
+                LambdaFunctionARN: !Ref EdgeSignerFunction.Version
+                IncludeBody: true   # Required for POST body signing
+
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+
+Outputs:
+  CloudFrontUrl:
+    Description: Public URL for the multi-agent demo UI
+    Value: !Sub "https://${CloudFrontDistribution.DomainName}"
+
+  CloudFrontDistributionId:
+    Description: CloudFront distribution ID (for cache invalidation)
+    Value: !Ref CloudFrontDistribution
+
+  FrontendBucketName:
+    Description: S3 bucket name — sync your frontend build here
+    Value: !Ref FrontendBucket
