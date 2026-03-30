@@ -4,7 +4,9 @@ import ConversationPanel from './ConversationPanel.jsx'
 import CodePanel from './CodePanel.jsx'
 import ConfigPanel from './ConfigPanel.jsx'
 
-export default function MultiAgentScenarioView({ scenario, onBack }) {
+export default function ScenarioView({ scenario, onBack }) {
+  const isMultiAgent = scenario.type === 'multi-agent'
+
   const [state, setState] = useState('idle') // idle | running | done | error
   const [result, setResult] = useState(null)
   const [errorMsg, setErrorMsg] = useState('')
@@ -15,8 +17,12 @@ export default function MultiAgentScenarioView({ scenario, onBack }) {
     setResult(null)
     setErrorMsg('')
 
+    const apiBase = isMultiAgent
+      ? (import.meta.env.VITE_MULTI_AGENT_API_URL || '/api')
+      : (import.meta.env.VITE_SINGLE_AGENT_API_URL || '/api')
+
     try {
-      const res = await fetch('/api', {
+      const res = await fetch(apiBase, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ scenarioId: scenario.id }),
@@ -34,12 +40,15 @@ export default function MultiAgentScenarioView({ scenario, onBack }) {
       setErrorMsg(err.message)
       setState('error')
     }
-  }, [scenario.id])
+  }, [scenario.id, isMultiAgent])
+
+  const conversationLabel = isMultiAgent ? 'Coordinator Conversation' : 'Conversation'
+  const gridCols = isMultiAgent ? '2fr 3fr' : '1fr 1fr'
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
-      {/* ── Scenario header ──────────────────────────────────────────────── */}
+      {/* Scenario header bar */}
       <div style={{
         background: 'var(--bg-panel)',
         borderBottom: '1px solid var(--border)',
@@ -52,11 +61,13 @@ export default function MultiAgentScenarioView({ scenario, onBack }) {
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{
-              fontSize: 11, fontWeight: 600,
+              fontSize: 11,
+              fontWeight: 600,
               color: scenario.domainColor,
               background: `${scenario.domainColor}18`,
               border: `1px solid ${scenario.domainColor}30`,
-              padding: '2px 8px', borderRadius: 20,
+              padding: '2px 8px',
+              borderRadius: 20,
               fontFamily: 'var(--font-mono)',
             }}>
               {scenario.domain}
@@ -79,46 +90,43 @@ export default function MultiAgentScenarioView({ scenario, onBack }) {
         <RunButton state={state} onClick={runScenario} />
       </div>
 
-      {/* ── Two-column body ──────────────────────────────────────────────── */}
+      {/* Split panel body */}
       <div style={{
         flex: 1,
         display: 'grid',
-        gridTemplateColumns: '2fr 3fr',
+        gridTemplateColumns: gridCols,
         overflow: 'hidden',
       }}>
-
-        {/* LEFT: Flow diagram (always visible) + Conversation */}
+        {/* Left: [FlowDiagram if multi-agent] + Conversation */}
         <div style={{
           borderRight: '1px solid var(--border)',
+          overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
-          overflow: 'hidden',
         }}>
-          {/* Flow diagram — always visible, fixed height */}
-          <div style={{
-            background: 'var(--bg-panel)',
-            borderBottom: '1px solid var(--border)',
-            flexShrink: 0,
-          }}>
-            <FlowDiagram state={state} result={result} />
-          </div>
-
-          {/* Conversation — scrollable */}
-          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-            <PanelHeader label="Coordinator Conversation" icon="💬" />
-            <div style={{ flex: 1, overflow: 'auto', padding: '12px 16px' }}>
-              <ConversationPanel
-                state={state}
-                result={result}
-                errorMsg={errorMsg}
-                scenario={scenario}
-              />
+          {isMultiAgent && (
+            <div style={{
+              background: 'var(--bg-panel)',
+              borderBottom: '1px solid var(--border)',
+              flexShrink: 0,
+            }}>
+              <FlowDiagram state={state} result={result} />
             </div>
+          )}
+
+          <PanelHeader label={conversationLabel} icon="💬" />
+          <div style={{ flex: 1, overflow: 'auto', padding: '12px 16px' }}>
+            <ConversationPanel
+              state={state}
+              result={result}
+              errorMsg={errorMsg}
+              scenario={scenario}
+            />
           </div>
         </div>
 
-        {/* RIGHT: Track tabs + code/config panel */}
-        <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* Right: Track switcher + code/config panel */}
+        <div style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <TrackTabs track={track} onTrack={setTrack} />
           <div style={{ flex: 1, overflow: 'auto' }}>
             {track === 0
@@ -127,13 +135,10 @@ export default function MultiAgentScenarioView({ scenario, onBack }) {
             }
           </div>
         </div>
-
       </div>
     </div>
   )
 }
-
-// ─── Panel header ──────────────────────────────────────────────────────────────
 
 function PanelHeader({ label, icon }) {
   return (
@@ -153,8 +158,6 @@ function PanelHeader({ label, icon }) {
     </div>
   )
 }
-
-// ─── Track tabs ────────────────────────────────────────────────────────────────
 
 function TrackTabs({ track, onTrack }) {
   const tabs = [
@@ -206,10 +209,9 @@ function TrackTabs({ track, onTrack }) {
   )
 }
 
-// ─── Run button ────────────────────────────────────────────────────────────────
-
 function RunButton({ state, onClick }) {
   const isRunning = state === 'running'
+
   return (
     <button
       onClick={onClick}
@@ -220,8 +222,11 @@ function RunButton({ state, onClick }) {
         border: isRunning ? '1px solid var(--border)' : 'none',
         borderRadius: 'var(--radius)',
         padding: '8px 20px',
-        fontSize: 13, fontWeight: 600,
-        display: 'flex', alignItems: 'center', gap: 8,
+        fontSize: 13,
+        fontWeight: 600,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
         transition: 'all 0.15s',
         whiteSpace: 'nowrap',
         flexShrink: 0,
