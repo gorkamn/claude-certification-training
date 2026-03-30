@@ -124,15 +124,14 @@ ui/
 │           ├── CodePanel         # Syntax-highlighted code with exam annotations
 │           ├── ConfigPanel       # Track 2 (Claude Code CLI) config files
 │           └── FlowDiagram       # Animated coordinator → subagent flow (multi-agent only)
-├── edge-signer/        # Lambda@Edge: SigV4-signs browser POSTs to Lambda Function URL
-├── template.yaml       # SAM template — single-agent stack
-├── template-multi.yaml # SAM template — multi-agent stack
-├── samconfig.toml      # SAM config — single-agent and multi-agent environments
+├── edge-signer/        # Lambda@Edge: SigV4-signs browser POSTs to Lambda Function URLs
+├── template.yaml       # SAM template — unified stack (/api-single* + /api-multi* on one CloudFront)
+├── samconfig.toml      # SAM config — single [default] environment
 └── DEPLOYMENT.md       # Full AWS deployment guide
 
 .github/workflows/
 ├── ci.yml              # Python lint/test + frontend build + Claude Code review (Domain 3 demo)
-└── deploy.yml          # SAM deploy pipeline (manual trigger)
+└── deploy.yml          # SAM deploy pipeline (manual trigger, single unified stack)
 ```
 
 ---
