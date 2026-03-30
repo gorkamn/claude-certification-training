@@ -1,6 +1,6 @@
 # Deploy pipeline — manual trigger only
 #
-# Deploys 01-agent-loop/ui to AWS:
+# Deploys the unified UI to AWS:
 #   1. sam build + sam deploy  (Lambda + CloudFront + S3 + Lambda@Edge)
 #   2. npm run build           (React frontend)
 #   3. aws s3 sync             (upload frontend to S3)
@@ -10,7 +10,7 @@
 #   AWS_ACCESS_KEY_ID       — IAM user with SAM deploy permissions
 #   AWS_SECRET_ACCESS_KEY   — IAM user secret
 #   AWS_REGION              — e.g. us-east-1
-#   ANTHROPIC_API_KEY       — passed to Lambda as env var
+#   ANTHROPIC_API_KEY       — passed to Lambda as env var (multi-agent stack)
 #   REFUND_THRESHOLD        — e.g. 500
 #   HUMAN_ESCALATION_EMAIL  — e.g. support@example.com
 #
@@ -22,24 +22,24 @@ name: Deploy
 on:
   workflow_dispatch:
     inputs:
-      project:
-        description: "Which project UI to deploy"
+      stack:
+        description: "Which stack to deploy"
         required: true
-        default: "01-agent-loop"
+        default: "single-agent"
         type: choice
         options:
-          - 01-agent-loop
-          # 02-multi-agent added when that stack is ready
+          - single-agent
+          - multi-agent
 
 jobs:
   deploy:
-    name: Deploy ${{ inputs.project }}/ui
+    name: Deploy ${{ inputs.stack }}
     runs-on: ubuntu-latest
     environment: production
 
     defaults:
       run:
-        working-directory: ${{ inputs.project }}/ui
+        working-directory: ui
 
     steps:
       - uses: actions/checkout@v4
@@ -69,11 +69,17 @@ jobs:
       #   - Lambda@Edge for SigV4 signing (IncludeBody: true for POST bodies)
       #   - CloudFront distribution + S3 bucket with OAC
       - name: SAM build
-        run: sam build
+        run: |
+          if [ "${{ inputs.stack }}" = "multi-agent" ]; then
+            sam build -t template-multi.yaml
+          else
+            sam build
+          fi
 
       - name: SAM deploy
         run: |
           sam deploy \
+            --config-env ${{ inputs.stack }} \
             --no-confirm-changeset \
             --parameter-overrides \
               "AnthropicApiKey=${{ secrets.ANTHROPIC_API_KEY }}" \
@@ -84,8 +90,8 @@ jobs:
       - name: Get stack outputs
         id: stack
         run: |
-          STACK_NAME=$(grep 'stack_name' samconfig.toml | head -1 | awk -F'"' '{print $2}')
-          REGION=$(grep 'region' samconfig.toml | head -1 | awk -F'"' '{print $2}')
+          STACK_NAME=$(grep -A2 '\[${{ inputs.stack }}\.global' samconfig.toml | grep stack_name | awk -F'"' '{print $2}')
+          REGION=$(grep -A3 '\[${{ inputs.stack }}\.global' samconfig.toml | grep region | awk -F'"' '{print $2}')
 
           BUCKET=$(aws cloudformation describe-stacks \
             --stack-name "$STACK_NAME" --region "$REGION" \
@@ -99,13 +105,16 @@ jobs:
 
           echo "bucket=$BUCKET" >> $GITHUB_OUTPUT
           echo "distribution_id=$DIST_ID" >> $GITHUB_OUTPUT
+          echo "stack_name=$STACK_NAME" >> $GITHUB_OUTPUT
+          echo "region=$REGION" >> $GITHUB_OUTPUT
 
       # ── Frontend: build + upload ───────────────────────────────────────────
       - name: Build frontend
         run: npm ci && npm run build
-        working-directory: ${{ inputs.project }}/ui/frontend
+        working-directory: ui/frontend
 
       - name: Upload to S3
+        working-directory: ui
         run: |
           aws s3 sync frontend/dist/ s3://${{ steps.stack.outputs.bucket }}/ \
             --delete \
@@ -124,10 +133,9 @@ jobs:
 
       - name: Done
         run: |
-          STACK_NAME=$(grep 'stack_name' samconfig.toml | head -1 | awk -F'"' '{print $2}')
-          REGION=$(grep 'region' samconfig.toml | head -1 | awk -F'"' '{print $2}')
           URL=$(aws cloudformation describe-stacks \
-            --stack-name "$STACK_NAME" --region "$REGION" \
+            --stack-name "${{ steps.stack.outputs.stack_name }}" \
+            --region "${{ steps.stack.outputs.region }}" \
             --query "Stacks[0].Outputs[?OutputKey=='CloudFrontUrl'].OutputValue" \
             --output text)
           echo "Deployed to: $URL" >> $GITHUB_STEP_SUMMARY

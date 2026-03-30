@@ -1,9 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  TechCo Multi-Agent Support Demo UI
+  TechCo Multi-Agent Support Demo — multi-agent stack
   Lambda (IAM Function URL) + S3 + CloudFront + Lambda@Edge SigV4 signer
-  Same security architecture as 01-agent-loop/ui — see DEPLOYMENT.md for details.
 
 Parameters:
   ClaudeModel:
@@ -38,7 +37,7 @@ Resources:
       FunctionName: !Sub "${AWS::StackName}-coordinator"
       Runtime: python3.13
       Architectures: [x86_64]
-      CodeUri: backend/
+      CodeUri: ../02-multi-agent/ui/backend/
       Handler: lambda_handler.handler
       Description: Runs multi-agent coordinator with trace instrumentation
       Environment:
@@ -57,13 +56,14 @@ Resources:
                 - !Sub "arn:aws:bedrock:*::foundation-model/*"
                 - !Sub "arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*"
       FunctionUrlConfig:
-        # AuthType: AWS_IAM — not publicly accessible.
-        # Lambda@Edge SigV4 signer handles signing so browsers don't need IAM credentials.
+        # IMPORTANT: Must be AWS_IAM, not NONE. AuthType: NONE triggers Palisade
+        # security findings (world-accessible Lambda). The Lambda@Edge signer
+        # handles SigV4 signing so browsers don't need IAM credentials.
         AuthType: AWS_IAM
 
   # ─── Allow Lambda@Edge role to invoke the Function URL ───────────────────────
-  # GOTCHA: Both permissions are required. InvokeFunctionUrl alone causes
-  # AccessDeniedException. See DEPLOYMENT.md for the full explanation.
+  # GOTCHA: Both resource-based permissions are required. InvokeFunctionUrl alone
+  # produces AccessDeniedException. The edge signer needs InvokeFunction too.
   EdgeSignerInvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -80,6 +80,10 @@ Resources:
       Principal: !GetAtt EdgeSignerFunctionRole.Arn
 
   # ─── Lambda@Edge (SigV4 signer for /api origin requests) ─────────────────────
+  # WHY Lambda@Edge instead of CloudFront OAC?
+  # OAC cannot sign POST request bodies. Lambda Function URLs require the payload
+  # hash (x-amz-content-sha256) for POST/PUT, but OAC only signs headers.
+  # Browsers can't compute SigV4 signatures, so Lambda@Edge does it at the edge.
   EdgeSignerFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -100,6 +104,9 @@ Resources:
                 - lambda.amazonaws.com
                 - edgelambda.amazonaws.com
             Action: sts:AssumeRole
+      # GOTCHA: Do NOT add Condition: { StringEquals: { lambda:FunctionUrlAuthType: AWS_IAM } }
+      # to this policy. It looks correct but causes AccessDeniedException at runtime.
+      # Scope by Resource ARN instead.
       Policies:
         - Statement:
             - Effect: Allow
@@ -178,7 +185,7 @@ Resources:
             CustomOriginConfig:
               OriginProtocolPolicy: https-only
               OriginSSLProtocols: [TLSv1.2]
-              OriginReadTimeout: 120     # Match Lambda timeout
+              OriginReadTimeout: 120    # Match Lambda timeout
 
         DefaultCacheBehavior:
           TargetOriginId: S3Origin
@@ -195,7 +202,7 @@ Resources:
             ViewerProtocolPolicy: redirect-to-https
             AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
             CachedMethods: [GET, HEAD]
-            # Managed-CachingDisabled
+            # Managed-CachingDisabled (API calls must not be cached)
             CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
             # Managed-AllViewerExceptHostHeader
             OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
@@ -203,8 +210,16 @@ Resources:
             LambdaFunctionAssociations:
               - EventType: origin-request
                 LambdaFunctionARN: !Ref EdgeSignerFunction.Version
-                IncludeBody: true   # Required for POST body signing
+                # IMPORTANT: IncludeBody must be true for POST signing.
+                # Without it, the edge signer can't read the request body
+                # and the payload hash will be wrong → InvalidSignatureException.
+                IncludeBody: true
 
+        # SPA routing: S3 returns 403 for missing keys (private bucket) → serve index.html
+        # GOTCHA: These apply globally to ALL origins, including Lambda. If the Lambda
+        # origin returns 403 (e.g., bad SigV4 signature), this silently replaces it with
+        # index.html — making it look like a routing problem instead of an auth problem.
+        # When debugging API issues, temporarily remove these to see the real error.
         CustomErrorResponses:
           - ErrorCode: 403
             ResponseCode: 200
@@ -217,7 +232,7 @@ Resources:
 
 Outputs:
   CloudFrontUrl:
-    Description: Public URL for the multi-agent demo UI
+    Description: CloudFront distribution URL (your app's public URL)
     Value: !Sub "https://${CloudFrontDistribution.DomainName}"
 
   CloudFrontDistributionId:
