@@ -138,6 +138,7 @@ function DomainLegend() {
   const domains = [
     { label: 'Domain 1', desc: 'Agentic loops, hooks, multi-concern, multi-agent', color: '#3b82f6' },
     { label: 'Domain 2', desc: 'Tool design, error handling, scoped tools', color: '#ef4444' },
+    { label: 'Domain 3', desc: 'CLAUDE.md, skills, slash commands, CI/CD integration', color: '#06b6d4' },
     { label: 'Domain 4', desc: 'Structured extraction & few-shot', color: '#a855f7' },
     { label: 'Domain 5', desc: 'Context management & escalation', color: '#f59e0b' },
   ]
