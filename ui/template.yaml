@@ -1,8 +1,11 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  TechCo Support Agent — single-agent stack
-  Lambda (IAM Function URL) + S3 + CloudFront + Lambda@Edge SigV4 signer
+  TechCo Support Agent — unified stack
+  Single CloudFront distribution serving both single-agent and multi-agent backends:
+    /api-single* → Lambda@Edge signer → single-agent Lambda Function URL
+    /api-multi*  → Lambda@Edge signer → multi-agent Lambda Function URL
+    /*           → S3 (React static app)
 
 Parameters:
   ClaudeModel:
@@ -13,15 +16,23 @@ Parameters:
     Type: String
     Default: "500"
     Description: Dollar threshold above which refunds are blocked by the hook
+  AnthropicApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Anthropic API key (leave blank if using Bedrock)
+  HumanEscalationEmail:
+    Type: String
+    Default: "support@example.com"
+    Description: Email for human escalation tickets
 
 Globals:
   Function:
-    Timeout: 60
     MemorySize: 512
 
 Resources:
 
-  # ─── Lambda (scenario runner) ────────────────────────────────────────────────
+  # ─── Single-agent Lambda ───────────────────────────────────────────────────
   AgentFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -30,7 +41,8 @@ Resources:
       Architectures: [x86_64]
       CodeUri: ../01-agent-loop/ui/backend/
       Handler: lambda_handler.lambda_handler
-      Description: Runs Claude certification demo scenarios
+      Timeout: 60
+      Description: Runs single-agent certification demo scenarios
       Environment:
         Variables:
           CLAUDE_MODEL: !Ref ClaudeModel
@@ -50,41 +62,81 @@ Resources:
         # handles SigV4 signing so browsers don't need IAM credentials.
         AuthType: AWS_IAM
 
-  # ─── Allow Lambda@Edge role to invoke the Function URL ───────────────────────
-  # GOTCHA: Both resource-based permissions are required. InvokeFunctionUrl alone
-  # produces AccessDeniedException. The edge signer needs InvokeFunction too.
-  EdgeSignerInvokePermission:
+  EdgeSignerSingleInvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
       FunctionName: !Ref AgentFunction
       Action: lambda:InvokeFunctionUrl
-      Principal: !GetAtt EdgeSignerFunctionRole.Arn
+      Principal: !GetAtt EdgeSignerSingleFunctionRole.Arn
       FunctionUrlAuthType: AWS_IAM
 
-  EdgeSignerInvokePermission2:
+  EdgeSignerSingleInvokePermission2:
     Type: AWS::Lambda::Permission
     Properties:
       FunctionName: !Ref AgentFunction
       Action: lambda:InvokeFunction
-      Principal: !GetAtt EdgeSignerFunctionRole.Arn
+      Principal: !GetAtt EdgeSignerSingleFunctionRole.Arn
 
-  # ─── Lambda@Edge (SigV4 signer for /api origin requests) ─────────────────────
+  # ─── Multi-agent Lambda ────────────────────────────────────────────────────
+  CoordinatorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-coordinator"
+      Runtime: python3.13
+      Architectures: [x86_64]
+      CodeUri: ../02-multi-agent/ui/backend/
+      Handler: lambda_handler.handler
+      Timeout: 120    # Multi-agent runs take longer — 3 parallel subagents
+      Description: Runs multi-agent coordinator with trace instrumentation
+      Environment:
+        Variables:
+          CLAUDE_MODEL: !Ref ClaudeModel
+          REFUND_THRESHOLD: !Ref RefundThreshold
+          ANTHROPIC_API_KEY: !Ref AnthropicApiKey
+          HUMAN_ESCALATION_EMAIL: !Ref HumanEscalationEmail
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - !Sub "arn:aws:bedrock:*::foundation-model/*"
+                - !Sub "arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*"
+      FunctionUrlConfig:
+        AuthType: AWS_IAM
+
+  EdgeSignerMultiInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CoordinatorFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: !GetAtt EdgeSignerMultiFunctionRole.Arn
+      FunctionUrlAuthType: AWS_IAM
+
+  EdgeSignerMultiInvokePermission2:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CoordinatorFunction
+      Action: lambda:InvokeFunction
+      Principal: !GetAtt EdgeSignerMultiFunctionRole.Arn
+
+  # ─── Lambda@Edge — single-agent SigV4 signer ──────────────────────────────
   # WHY Lambda@Edge instead of CloudFront OAC?
   # OAC cannot sign POST request bodies. Lambda Function URLs require the payload
   # hash (x-amz-content-sha256) for POST/PUT, but OAC only signs headers.
   # Browsers can't compute SigV4 signatures, so Lambda@Edge does it at the edge.
-  # See DEPLOYMENT.md "Why Lambda@Edge instead of CloudFront OAC?" for details.
-  EdgeSignerFunction:
+  EdgeSignerSingleFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "${AWS::StackName}-edge-signer"
+      FunctionName: !Sub "${AWS::StackName}-edge-signer-single"
       Runtime: nodejs20.x
       CodeUri: edge-signer/
       Handler: index.handler
       MemorySize: 128
       Timeout: 10
       AutoPublishAlias: live
-      Description: Signs /api origin requests with SigV4 (origin-request event)
+      Description: Signs /api-single* origin requests with SigV4 (origin-request event)
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -112,7 +164,43 @@ Resources:
                 - logs:PutLogEvents
               Resource: "arn:aws:logs:*:*:*"
 
-  # ─── S3 (frontend static files) ──────────────────────────────────────────────
+  # ─── Lambda@Edge — multi-agent SigV4 signer ───────────────────────────────
+  EdgeSignerMultiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-edge-signer-multi"
+      Runtime: nodejs20.x
+      CodeUri: edge-signer/
+      Handler: index.handler
+      MemorySize: 128
+      Timeout: 10
+      AutoPublishAlias: live
+      Description: Signs /api-multi* origin requests with SigV4 (origin-request event)
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - edgelambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunctionUrl
+                - lambda:InvokeFunction
+              Resource: !GetAtt CoordinatorFunction.Arn
+        - Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: "arn:aws:logs:*:*:*"
+
+  # ─── S3 (frontend static files) ──────────────────────────────────────────
   FrontendBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -139,7 +227,7 @@ Resources:
               StringEquals:
                 AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
 
-  # ─── CloudFront OAC — S3 ─────────────────────────────────────────────────────
+  # ─── CloudFront OAC — S3 ─────────────────────────────────────────────────
   S3OriginAccessControl:
     Type: AWS::CloudFront::OriginAccessControl
     Properties:
@@ -149,12 +237,12 @@ Resources:
         SigningBehavior: always
         SigningProtocol: sigv4
 
-  # ─── CloudFront Distribution ─────────────────────────────────────────────────
+  # ─── CloudFront Distribution ──────────────────────────────────────────────
   CloudFrontDistribution:
     Type: AWS::CloudFront::Distribution
     Properties:
       DistributionConfig:
-        Comment: !Sub "${AWS::StackName} frontend"
+        Comment: !Sub "${AWS::StackName} unified UI"
         Enabled: true
         HttpVersion: http2
         DefaultRootObject: index.html
@@ -166,7 +254,7 @@ Resources:
             S3OriginConfig: {}
             OriginAccessControlId: !GetAtt S3OriginAccessControl.Id
 
-          - Id: LambdaOrigin
+          - Id: SingleAgentOrigin
             DomainName: !Select
               - 2
               - !Split
@@ -176,6 +264,17 @@ Resources:
               OriginProtocolPolicy: https-only
               OriginSSLProtocols: [TLSv1.2]
               OriginReadTimeout: 60
+
+          - Id: MultiAgentOrigin
+            DomainName: !Select
+              - 2
+              - !Split
+                - "/"
+                - !GetAtt CoordinatorFunctionUrl.FunctionUrl
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+              OriginReadTimeout: 120    # Match multi-agent Lambda timeout
 
         DefaultCacheBehavior:
           TargetOriginId: S3Origin
@@ -187,8 +286,8 @@ Resources:
           Compress: true
 
         CacheBehaviors:
-          - PathPattern: /api*
-            TargetOriginId: LambdaOrigin
+          - PathPattern: /api-single*
+            TargetOriginId: SingleAgentOrigin
             ViewerProtocolPolicy: redirect-to-https
             AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
             CachedMethods: [GET, HEAD]
@@ -199,14 +298,29 @@ Resources:
             Compress: true
             LambdaFunctionAssociations:
               - EventType: origin-request
-                LambdaFunctionARN: !Ref EdgeSignerFunction.Version
+                LambdaFunctionARN: !Ref EdgeSignerSingleFunction.Version
                 # IMPORTANT: IncludeBody must be true for POST signing.
                 # Without it, the edge signer can't read the request body
                 # and the payload hash will be wrong → InvalidSignatureException.
                 IncludeBody: true
 
+          - PathPattern: /api-multi*
+            TargetOriginId: MultiAgentOrigin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachedMethods: [GET, HEAD]
+            # Managed-CachingDisabled
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            # Managed-AllViewerExceptHostHeader
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            Compress: true
+            LambdaFunctionAssociations:
+              - EventType: origin-request
+                LambdaFunctionARN: !Ref EdgeSignerMultiFunction.Version
+                IncludeBody: true
+
         # SPA routing: S3 returns 403 for missing keys (private bucket) → serve index.html
-        # GOTCHA: These apply globally to ALL origins, including Lambda. If the Lambda
+        # GOTCHA: These apply globally to ALL origins, including Lambda. If a Lambda
         # origin returns 403 (e.g., bad SigV4 signature), this silently replaces it with
         # index.html — making it look like a routing problem instead of an auth problem.
         # When debugging API issues, temporarily remove these to see the real error.

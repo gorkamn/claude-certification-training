@@ -1,16 +1,21 @@
 # Deploy pipeline — manual trigger only
 #
 # Deploys the unified UI to AWS:
-#   1. sam build + sam deploy  (Lambda + CloudFront + S3 + Lambda@Edge)
+#   1. sam build + sam deploy  (both Lambdas + CloudFront + S3 + two Lambda@Edge signers)
 #   2. npm run build           (React frontend)
 #   3. aws s3 sync             (upload frontend to S3)
 #   4. CloudFront invalidation (bust CDN cache)
+#
+# CloudFront path routing:
+#   /api-single* → single-agent Lambda (agent loop, tools, hooks)
+#   /api-multi*  → multi-agent Lambda  (coordinator + subagents)
+#   /*           → S3 (React SPA)
 #
 # Required GitHub secrets:
 #   AWS_ACCESS_KEY_ID       — IAM user with SAM deploy permissions
 #   AWS_SECRET_ACCESS_KEY   — IAM user secret
 #   AWS_REGION              — e.g. us-east-1
-#   ANTHROPIC_API_KEY       — passed to Lambda as env var (multi-agent stack)
+#   ANTHROPIC_API_KEY       — passed to multi-agent Lambda as env var
 #   REFUND_THRESHOLD        — e.g. 500
 #   HUMAN_ESCALATION_EMAIL  — e.g. support@example.com
 #
@@ -21,19 +26,10 @@ name: Deploy
 
 on:
   workflow_dispatch:
-    inputs:
-      stack:
-        description: "Which stack to deploy"
-        required: true
-        default: "single-agent"
-        type: choice
-        options:
-          - single-agent
-          - multi-agent
 
 jobs:
   deploy:
-    name: Deploy ${{ inputs.stack }}
+    name: Deploy unified stack
     runs-on: ubuntu-latest
     environment: production
 
@@ -65,21 +61,16 @@ jobs:
       # ── Backend: SAM build + deploy ────────────────────────────────────────
       # sam build: installs Python deps into Lambda packages
       # sam deploy: creates/updates CloudFormation stack
-      #   - Lambda Function URL with AuthType: AWS_IAM (not publicly accessible)
-      #   - Lambda@Edge for SigV4 signing (IncludeBody: true for POST bodies)
-      #   - CloudFront distribution + S3 bucket with OAC
+      #   - Two Lambda Function URLs with AuthType: AWS_IAM
+      #   - Two Lambda@Edge signers (one per backend, IncludeBody: true for POST)
+      #   - CloudFront with /api-single* and /api-multi* cache behaviors
+      #   - S3 bucket with OAC for the React SPA
       - name: SAM build
-        run: |
-          if [ "${{ inputs.stack }}" = "multi-agent" ]; then
-            sam build -t template-multi.yaml
-          else
-            sam build
-          fi
+        run: sam build
 
       - name: SAM deploy
         run: |
           sam deploy \
-            --config-env ${{ inputs.stack }} \
             --no-confirm-changeset \
             --parameter-overrides \
               "AnthropicApiKey=${{ secrets.ANTHROPIC_API_KEY }}" \
@@ -90,8 +81,8 @@ jobs:
       - name: Get stack outputs
         id: stack
         run: |
-          STACK_NAME=$(grep -A2 '\[${{ inputs.stack }}\.global' samconfig.toml | grep stack_name | awk -F'"' '{print $2}')
-          REGION=$(grep -A3 '\[${{ inputs.stack }}\.global' samconfig.toml | grep region | awk -F'"' '{print $2}')
+          STACK_NAME=$(grep 'stack_name' samconfig.toml | head -1 | awk -F'"' '{print $2}')
+          REGION=$(grep 'region' samconfig.toml | head -1 | awk -F'"' '{print $2}')
 
           BUCKET=$(aws cloudformation describe-stacks \
             --stack-name "$STACK_NAME" --region "$REGION" \

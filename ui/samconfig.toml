@@ -1,26 +1,14 @@
 version = 0.1
 
-# Single-agent stack — uses template.yaml (default)
-# Deploy with: sam build && sam deploy --config-env single-agent
-[single-agent.global.parameters]
+# Single unified stack — both backends in one CloudFront distribution.
+# Deploy with: sam build && sam deploy
+[default.global.parameters]
 stack_name = "claude-cert-demo"
 region = "us-east-1"
 
-[single-agent.deploy.parameters]
+[default.deploy.parameters]
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = false
 resolve_s3 = true
 # Optionally override the model at deploy time:
-# parameter_overrides = "ClaudeModel=us.anthropic.claude-3-5-sonnet-20241022-v2:0"
-
-# Multi-agent stack — uses template-multi.yaml
-# Deploy with: sam build -t template-multi.yaml && sam deploy --config-env multi-agent
-[multi-agent.global.parameters]
-stack_name = "claude-cert-multi-agent"
-region = "us-east-1"
-template_file = "template-multi.yaml"
-
-[multi-agent.deploy.parameters]
-capabilities = "CAPABILITY_IAM"
-confirm_changeset = false
-resolve_s3 = true
+# parameter_overrides = "ClaudeModel=us.anthropic.claude-sonnet-4-6"
