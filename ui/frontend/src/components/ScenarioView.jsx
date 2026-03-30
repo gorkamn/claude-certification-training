@@ -18,8 +18,8 @@ export default function ScenarioView({ scenario, onBack }) {
     setErrorMsg('')
 
     const apiBase = isMultiAgent
-      ? (import.meta.env.VITE_MULTI_AGENT_API_URL || '/api')
-      : (import.meta.env.VITE_SINGLE_AGENT_API_URL || '/api')
+      ? (import.meta.env.VITE_MULTI_AGENT_API_URL || '/api-multi')
+      : (import.meta.env.VITE_SINGLE_AGENT_API_URL || '/api-single')
 
     try {
       const res = await fetch(apiBase, {
