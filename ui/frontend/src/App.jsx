@@ -62,7 +62,7 @@ function Header({ onHome, showBack }) {
               TechCo Support Agent
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: -2 }}>
-              Claude Certification Training Demo
+              Claude Certification Training — Single & Multi-Agent Demo
             </div>
           </div>
         </div>

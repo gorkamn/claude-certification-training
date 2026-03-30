@@ -65,8 +65,7 @@ jobs:
       fail-fast: false
       matrix:
         project:
-          - 01-agent-loop/ui/frontend
-          - 02-multi-agent/ui/frontend
+          - ui/frontend
     steps:
       - uses: actions/checkout@v4
 

@@ -15,8 +15,9 @@ export default function ScenarioSelector({ onSelect }) {
           Choose a Scenario
         </h1>
         <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>
-          Each scenario exercises a specific exam domain. Select one to run it live against the Claude API
-          and see the conversation side-by-side with the relevant code.
+          Each scenario exercises a specific exam domain. Single-agent scenarios demonstrate
+          agentic loops, hooks, and extraction. The multi-agent scenario shows coordinator/subagent
+          orchestration. Select one to run it live against the Claude API.
         </p>
       </div>
 
@@ -42,6 +43,7 @@ export default function ScenarioSelector({ onSelect }) {
 
 function ScenarioCard({ scenario, index, onClick }) {
   const [hovered, setHovered] = useState(false)
+  const isMultiAgent = scenario.type === 'multi-agent'
 
   return (
     <button
@@ -65,8 +67,8 @@ function ScenarioCard({ scenario, index, onClick }) {
         gap: 12,
       }}
     >
-      {/* Domain badge */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      {/* Domain badge + type badge */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         <span style={{
           fontSize: 11,
           fontWeight: 600,
@@ -80,12 +82,27 @@ function ScenarioCard({ scenario, index, onClick }) {
         }}>
           {scenario.domain}
         </span>
-        <span style={{
-          color: 'var(--text-muted)',
-          fontSize: 16,
-          transition: 'transform 0.15s',
-          transform: hovered ? 'translateX(3px)' : 'translateX(0)',
-        }}>→</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{
+            fontSize: 10,
+            fontWeight: 600,
+            color: isMultiAgent ? 'var(--accent)' : 'var(--text-muted)',
+            background: isMultiAgent ? 'var(--accent-light)' : 'var(--bg-base)',
+            border: `1px solid ${isMultiAgent ? 'rgba(124,58,237,0.3)' : 'var(--border)'}`,
+            padding: '1px 7px',
+            borderRadius: 20,
+            fontFamily: 'var(--font-mono)',
+            letterSpacing: '0.03em',
+          }}>
+            {isMultiAgent ? 'multi-agent' : 'single-agent'}
+          </span>
+          <span style={{
+            color: 'var(--text-muted)',
+            fontSize: 16,
+            transition: 'transform 0.15s',
+            transform: hovered ? 'translateX(3px)' : 'translateX(0)',
+          }}>→</span>
+        </div>
       </div>
 
       {/* Title */}
@@ -119,8 +136,8 @@ function ScenarioCard({ scenario, index, onClick }) {
 
 function DomainLegend() {
   const domains = [
-    { label: 'Domain 1', desc: 'Agentic loops, hooks, multi-concern', color: '#3b82f6' },
-    { label: 'Domain 2', desc: 'Tool design & error handling', color: '#ef4444' },
+    { label: 'Domain 1', desc: 'Agentic loops, hooks, multi-concern, multi-agent', color: '#3b82f6' },
+    { label: 'Domain 2', desc: 'Tool design, error handling, scoped tools', color: '#ef4444' },
     { label: 'Domain 4', desc: 'Structured extraction & few-shot', color: '#a855f7' },
     { label: 'Domain 5', desc: 'Context management & escalation', color: '#f59e0b' },
   ]
