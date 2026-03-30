@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  TechCo Support Agent Demo UI
+  TechCo Support Agent — single-agent stack
   Lambda (IAM Function URL) + S3 + CloudFront + Lambda@Edge SigV4 signer
 
 Parameters:
@@ -28,7 +28,7 @@ Resources:
       FunctionName: !Sub "${AWS::StackName}-agent"
       Runtime: python3.13
       Architectures: [x86_64]
-      CodeUri: backend/
+      CodeUri: ../01-agent-loop/ui/backend/
       Handler: lambda_handler.lambda_handler
       Description: Runs Claude certification demo scenarios
       Environment:
@@ -221,9 +221,13 @@ Resources:
             ErrorCachingMinTTL: 0
 
 Outputs:
-  CloudFrontDomain:
+  CloudFrontUrl:
     Description: CloudFront distribution URL (your app's public URL)
     Value: !Sub "https://${CloudFrontDistribution.DomainName}"
+
+  CloudFrontDistributionId:
+    Description: CloudFront distribution ID (for cache invalidation)
+    Value: !Ref CloudFrontDistribution
 
   FrontendBucketName:
     Description: S3 bucket name — sync your frontend build here
